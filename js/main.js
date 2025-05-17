@@ -1,360 +1,366 @@
+// Initialize Supabase client (replace with your keys)
+const supabaseUrl = 'https://bidotqqjspfyaexqlxdt.supabase.co';
+const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJpZG90cXFqc3BmeWFleHFseGR0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc0OTI0MTIsImV4cCI6MjA2MzA2ODQxMn0.OW7XnCJ35ygpUZ5wftPkB4zalSdwf5YbInuEhFCPufo';
+const supabase = supabase.createClient(supabaseUrl, supabaseKey);
 
-<script>
-  // Initialize Supabase client properly
-  const supabase = supabase.createClient(
-    'https://bidotqqjspfyaexqlxdt.supabase.co',
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJpZG90cXFqc3BmeWFleHFseGR0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc0OTI0MTIsImV4cCI6MjA2MzA2ODQxMn0.OW7XnCJ35ygpUZ5wftPkB4zalSdwf5YbInuEhFCPufo'
-  );
-
-  // DOM Ready
-  document.addEventListener('DOMContentLoaded', () => {
+// DOM Elements and event listeners same as before
+document.addEventListener('DOMContentLoaded', function() {
     initApp();
-
     document.getElementById('expenseForm').addEventListener('submit', addExpense);
     document.getElementById('editBudgetForm').addEventListener('submit', updateBudget);
     document.getElementById('resetBudgetBtn').addEventListener('click', resetBudget);
-
-    document.body.addEventListener('submit', event => {
-      if (event.target.id === 'editExpenseForm') {
-        event.preventDefault();
-        updateExpense(event);
-      }
+    document.body.addEventListener('submit', function(event) {
+        if (event.target.id === 'editExpenseForm') {
+            event.preventDefault();
+            updateExpense(event);
+        }
     });
-  });
+});
 
-  // Globals
-  let currentBudget = 0;
-  let expensesList = [];
-
-  // Initialize app: load month, budget, expenses, and update UI
-  async function initApp() {
+async function initApp() {
     displayCurrentMonth();
     await loadBudget();
     await loadExpenses();
-    updateBudgetDisplay();
-  }
+    await updateBudgetDisplay();
+}
 
-  // Show current month Year
-  function displayCurrentMonth() {
+function displayCurrentMonth() {
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     const now = new Date();
-    document.getElementById('currentMonth').textContent = `${months[now.getMonth()]} ${now.getFullYear()}`;
-  }
+    const monthYear = `${months[now.getMonth()]} ${now.getFullYear()}`;
+    document.getElementById('currentMonth').textContent = monthYear;
+}
 
-  // Load budget from Supabase (assuming only 1 budget record)
-  async function loadBudget() {
+function getCurrentMonthKey() {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+// Load budget from Supabase or set to 0 if not exists
+async function loadBudget() {
+    const currentMonth = getCurrentMonthKey();
+    
     const { data, error } = await supabase
-      .from('budgets')
-      .select('*')
-      .limit(1)
-      .single();
+        .from('budgets')
+        .select('amount')
+        .eq('month', currentMonth)
+        .single();
 
-    if (error) {
-      console.error('Failed to load budget:', error.message);
-      currentBudget = 0;
-      updateBudgetUI(0);
-      return;
+    let budgetAmount = 0;
+    if (error && error.code !== 'PGRST116') { // PGRST116 = no rows found
+        console.error('Error loading budget:', error);
+        alert('Failed to load budget.');
+        return;
+    }
+    
+    if (data) {
+        budgetAmount = data.amount;
+    } else {
+        // Insert a default budget 0 if none exists
+        const { error: insertError } = await supabase
+            .from('budgets')
+            .insert([{ month: currentMonth, amount: 0 }]);
+        if (insertError) {
+            console.error('Error inserting default budget:', insertError);
+        }
     }
 
-    currentBudget = data?.amount || 0;
-    updateBudgetUI(currentBudget);
-  }
+    document.getElementById('budgetAmount').textContent = formatCurrency(budgetAmount);
+    document.getElementById('editBudgetAmount').value = budgetAmount;
+}
 
-  // Update budget UI display
-  function updateBudgetUI(amount) {
-    document.getElementById('budgetAmount').textContent = formatCurrency(amount);
-    document.getElementById('editBudgetAmount').value = amount;
-  }
+// Load expenses from Supabase for current month
+async function loadExpenses() {
+    const currentMonth = getCurrentMonthKey();
 
-  // Load expenses from Supabase
-  async function loadExpenses() {
     const { data, error } = await supabase
-      .from('expenses')
-      .select('*')
-      .order('date', { ascending: false });
+        .from('expenses')
+        .select('*')
+        .eq('month', currentMonth)
+        .order('date', { ascending: false });
 
     if (error) {
-      console.error('Failed to load expenses:', error.message);
-      expensesList = [];
-      renderExpensesTable([]);
-      return;
+        console.error('Error loading expenses:', error);
+        alert('Failed to load expenses.');
+        return;
     }
 
-    expensesList = data || [];
-    renderExpensesTable(expensesList);
-  }
+    renderExpensesTable(data || []);
+}
 
-  // Add new expense (submit event)
-  async function addExpense(event) {
+// Update the budget amount in Supabase
+async function updateBudget(event) {
     event.preventDefault();
 
-    const name = document.getElementById('restaurantName').value.trim();
-    const price = parseFloat(document.getElementById('expensePrice').value);
+    const budgetInput = document.getElementById('editBudgetAmount');
+    const newBudget = parseFloat(budgetInput.value);
 
-    if (!name || isNaN(price) || price < 0) {
-      alert('Please enter valid expense details.');
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from('expenses')
-      .insert([{ restaurant_name: name, price, date: new Date().toISOString() }]);
-
-    if (error) {
-      console.error('Failed to add expense:', error.message);
-      alert('Error adding expense.');
-      return;
-    }
-
-    document.getElementById('expenseForm').reset();
-    await loadExpenses();
-    updateBudgetDisplay();
-  }
-
-  // Update budget (submit event)
-  async function updateBudget(event) {
-    event.preventDefault();
-
-    const newBudget = parseFloat(document.getElementById('editBudgetAmount').value);
     if (isNaN(newBudget) || newBudget < 0) {
-      alert('Enter a valid budget.');
-      return;
-    }
-
-    // Assume only one budget record; update or insert accordingly
-    const { data: existing, error: fetchError } = await supabase
-      .from('budgets')
-      .select('*')
-      .limit(1)
-      .single();
-
-    if (fetchError && fetchError.code !== 'PGRST116') {
-      console.error('Error fetching budget:', fetchError.message);
-      return;
-    }
-
-    if (existing) {
-      // Update
-      const { error: updateError } = await supabase
-        .from('budgets')
-        .update({ amount: newBudget })
-        .eq('id', existing.id);
-
-      if (updateError) {
-        console.error('Failed to update budget:', updateError.message);
+        alert('Please enter a valid budget amount');
         return;
-      }
-    } else {
-      // Insert new budget row
-      const { error: insertError } = await supabase
-        .from('budgets')
-        .insert([{ amount: newBudget }]);
-
-      if (insertError) {
-        console.error('Failed to insert budget:', insertError.message);
-        return;
-      }
     }
 
-    currentBudget = newBudget;
-    updateBudgetUI(newBudget);
-    updateBudgetDisplay();
+    const currentMonth = getCurrentMonthKey();
 
-    // Hide modal
+    // Upsert budget
+    const { error } = await supabase
+        .from('budgets')
+        .upsert({ month: currentMonth, amount: newBudget }, { onConflict: 'month' });
+
+    if (error) {
+        console.error('Error updating budget:', error);
+        alert('Failed to update budget.');
+        return;
+    }
+
+    document.getElementById('budgetAmount').textContent = formatCurrency(newBudget);
+    await updateBudgetDisplay();
+
+    // Close modal
     const modal = bootstrap.Modal.getInstance(document.getElementById('editBudgetModal'));
     modal.hide();
-  }
+}
 
-  // Reset budget to zero
-  async function resetBudget() {
-    const zero = 0;
+// Reset budget to zero in Supabase
+async function resetBudget() {
+    const currentMonth = getCurrentMonthKey();
 
-    // Update budget record to 0
-    const { data: existing, error: fetchError } = await supabase
-      .from('budgets')
-      .select('*')
-      .limit(1)
-      .single();
+    const { error } = await supabase
+        .from('budgets')
+        .upsert({ month: currentMonth, amount: 0 }, { onConflict: 'month' });
 
-    if (fetchError && fetchError.code !== 'PGRST116') {
-      console.error('Error fetching budget:', fetchError.message);
-      return;
+    if (error) {
+        console.error('Error resetting budget:', error);
+        alert('Failed to reset budget.');
+        return;
     }
 
-    if (existing) {
-      const { error: updateError } = await supabase
-        .from('budgets')
-        .update({ amount: zero })
-        .eq('id', existing.id);
+    document.getElementById('budgetAmount').textContent = formatCurrency(0);
+    document.getElementById('editBudgetAmount').value = 0;
+    await updateBudgetDisplay();
 
-      if (updateError) {
-        console.error('Failed to reset budget:', updateError.message);
-        return;
-      }
-    } else {
-      const { error: insertError } = await supabase
-        .from('budgets')
-        .insert([{ amount: zero }]);
-
-      if (insertError) {
-        console.error('Failed to insert budget:', insertError.message);
-        return;
-      }
-    }
-
-    currentBudget = zero;
-    updateBudgetUI(zero);
-    updateBudgetDisplay();
-
-    // Hide modal
+    // Close modal
     const modal = bootstrap.Modal.getInstance(document.getElementById('editBudgetModal'));
     modal.hide();
-  }
+}
 
-  // Render expenses table rows
-  function renderExpensesTable(expenses) {
-    const tbody = document.getElementById('expensesTableBody');
-    const totalSpentElem = document.getElementById('totalSpent');
-    tbody.innerHTML = '';
+// Add a new expense to Supabase
+async function addExpense(event) {
+    event.preventDefault();
 
-    if (!expenses.length) {
-      document.getElementById('emptyTableMessage').classList.remove('d-none');
-      totalSpentElem.textContent = formatCurrency(0);
-      return;
-    } else {
-      document.getElementById('emptyTableMessage').classList.add('d-none');
+    const restaurantInput = document.getElementById('restaurantName');
+    const priceInput = document.getElementById('expensePrice');
+
+    const restaurant = restaurantInput.value.trim();
+    const price = parseFloat(priceInput.value);
+
+    if (restaurant === '') {
+        alert('Please enter a restaurant name');
+        return;
     }
 
-    let totalSpent = 0;
+    if (isNaN(price) || price <= 0) {
+        alert('Please enter a valid price');
+        return;
+    }
+
+    const currentMonth = getCurrentMonthKey();
+    const date = new Date().toISOString().split('T')[0];
+
+    const { error } = await supabase
+        .from('expenses')
+        .insert([{ month: currentMonth, restaurant, price, date }]);
+
+    if (error) {
+        console.error('Error adding expense:', error);
+        alert('Failed to add expense.');
+        return;
+    }
+
+    // Refresh expenses and UI
+    await loadExpenses();
+    await updateBudgetDisplay();
+
+    // Reset form
+    restaurantInput.value = '';
+    priceInput.value = '';
+    restaurantInput.focus();
+}
+
+// Render expenses table (same as before, but data comes from Supabase)
+function renderExpensesTable(expenses) {
+    const tableBody = document.getElementById('expensesTableBody');
+    const totalElement = document.getElementById('totalSpent');
+
+    tableBody.innerHTML = '';
+
+    let total = 0;
 
     expenses.forEach(expense => {
-      totalSpent += expense.price;
+        total += expense.price;
 
-      const tr = document.createElement('tr');
-      tr.setAttribute('data-id', expense.id);
-      tr.innerHTML = `
-        <td>${expense.restaurant_name}</td>
-        <td>₱${expense.price.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-        <td>${formatDate(expense.date)}</td>
-        <td class="text-end">
-          <button class="btn btn-sm btn-outline-secondary edit-expense" data-id="${expense.id}">Edit</button>
-          <button class="btn btn-sm btn-outline-danger delete-expense" data-id="${expense.id}">Delete</button>
-        </td>
-      `;
-      tbody.appendChild(tr);
+        const row = document.createElement('tr');
+        row.setAttribute('data-id', expense.id);
+        row.innerHTML = `
+            <td>${expense.restaurant}</td>
+            <td>₱${expense.price.toLocaleString('en-PH', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+            <td>${formatDate(expense.date)}</td>
+            <td class="text-end">
+                <button class="btn btn-sm btn-outline-secondary edit-expense" data-id="${expense.id}">Edit</button>
+                <button class="btn btn-sm btn-outline-danger delete-expense" data-id="${expense.id}">Delete</button>
+            </td>
+        `;
+
+        tableBody.appendChild(row);
     });
 
-    totalSpentElem.textContent = formatCurrency(totalSpent);
-
-    // Attach event listeners for edit & delete buttons
-    tbody.querySelectorAll('.edit-expense').forEach(button => {
-      button.addEventListener('click', openEditExpenseModal);
+    // Add event listeners to edit and delete buttons
+    document.querySelectorAll('.edit-expense').forEach(button => {
+        button.addEventListener('click', function() {
+            const expenseId = parseInt(this.getAttribute('data-id'));
+            editExpense(expenseId);
+        });
     });
-    tbody.querySelectorAll('.delete-expense').forEach(button => {
-      button.addEventListener('click', deleteExpense);
+
+    document.querySelectorAll('.delete-expense').forEach(button => {
+        button.addEventListener('click', function() {
+            const expenseId = parseInt(this.getAttribute('data-id'));
+            deleteExpense(expenseId);
+        });
     });
-  }
 
-  // Format currency string
-  function formatCurrency(amount) {
-    return '₱' + amount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }
+    totalElement.textContent = formatCurrency(total);
 
-  // Format date for display (YYYY-MM-DD)
-  function formatDate(dateString) {
-    const d = new Date(dateString);
-    return d.toISOString().split('T')[0];
-  }
-
-  // Calculate remaining budget and update progress bar
-  function updateBudgetDisplay() {
-    const totalSpent = expensesList.reduce((sum, e) => sum + e.price, 0);
-    const remaining = currentBudget - totalSpent;
-    const remainingElem = document.getElementById('remainingBudget');
-    const progressBar = document.getElementById('budgetProgressBar');
-
-    remainingElem.textContent = formatCurrency(remaining < 0 ? 0 : remaining);
-
-    const percent = currentBudget > 0 ? Math.min((totalSpent / currentBudget) * 100, 100) : 0;
-    progressBar.style.width = `${percent}%`;
-    progressBar.setAttribute('aria-valuenow', percent);
-
-    if (remaining < 0) {
-      progressBar.classList.remove('bg-success');
-      progressBar.classList.add('bg-danger');
+    const emptyMessage = document.getElementById('emptyTableMessage');
+    if (expenses.length === 0) {
+        emptyMessage.classList.remove('d-none');
     } else {
-      progressBar.classList.remove('bg-danger');
-      progressBar.classList.add('bg-success');
+        emptyMessage.classList.add('d-none');
     }
-  }
+}
 
-  // Open edit expense modal and populate form
-  async function openEditExpenseModal(event) {
-    const expenseId = event.target.getAttribute('data-id');
-    if (!expenseId) return;
+// Update budget display (remaining amount)
+async function updateBudgetDisplay() {
+    const currentMonth = getCurrentMonthKey();
 
-    const expense = expensesList.find(e => e.id == expenseId);
-    if (!expense) return;
+    // Fetch budget
+    const { data: budgetData, error: budgetError } = await supabase
+        .from('budgets')
+        .select('amount')
+        .eq('month', currentMonth)
+        .single();
 
-    document.getElementById('editExpenseId').value = expense.id;
-    document.getElementById('editExpenseName').value = expense.restaurant_name;
-    document.getElementById('editExpensePrice').value = expense.price;
+    if (budgetError && budgetError.code !== 'PGRST116') {
+        console.error('Error loading budget:', budgetError);
+        return;
+    }
 
-    const editModal = new bootstrap.Modal(document.getElementById('editExpenseModal'));
-    editModal.show();
-  }
+    const budget = budgetData ? budgetData.amount : 0;
 
-  // Update expense after editing
-  async function updateExpense(event) {
+    // Fetch expenses
+    const { data: expenses, error: expensesError } = await supabase
+        .from('expenses')
+        .select('price')
+        .eq('month', currentMonth);
+
+    if (expensesError) {
+        console.error('Error loading expenses:', expensesError);
+        return;
+    }
+
+    const totalSpent = expenses ? expenses.reduce((sum, e) => sum + e.price, 0) : 0;
+    const remaining = budget - totalSpent;
+
+    const remainingDisplay = document.getElementById('remainingAmount');
+    remainingDisplay.textContent = formatCurrency(remaining);
+
+    // Change color based on remaining budget
+    if (remaining < 0) {
+        remainingDisplay.classList.remove('text-success');
+        remainingDisplay.classList.add('text-danger');
+    } else {
+        remainingDisplay.classList.remove('text-danger');
+        remainingDisplay.classList.add('text-success');
+    }
+}
+
+// Format functions
+function formatCurrency(amount) {
+    return `₱${amount.toLocaleString('en-PH', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+}
+
+function formatDate(dateString) {
+    const d = new Date(dateString);
+    return d.toLocaleDateString('en-PH');
+}
+
+// Edit expense: open modal and load expense data
+async function editExpense(id) {
+    const { data, error } = await supabase
+        .from('expenses')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+    if (error) {
+        alert('Failed to load expense.');
+        return;
+    }
+
+    // Fill form
+    document.getElementById('editExpenseId').value = data.id;
+    document.getElementById('editRestaurantName').value = data.restaurant;
+    document.getElementById('editExpensePrice').value = data.price;
+
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('editExpenseModal'));
+    modal.show();
+}
+
+// Update expense in Supabase
+async function updateExpense(event) {
     event.preventDefault();
 
-    const id = document.getElementById('editExpenseId').value;
-    const name = document.getElementById('editExpenseName').value.trim();
+    const id = parseInt(document.getElementById('editExpenseId').value);
+    const restaurant = document.getElementById('editRestaurantName').value.trim();
     const price = parseFloat(document.getElementById('editExpensePrice').value);
 
-    if (!name || isNaN(price) || price < 0) {
-      alert('Please enter valid expense details.');
-      return;
+    if (!id || restaurant === '' || isNaN(price) || price <= 0) {
+        alert('Please enter valid expense details.');
+        return;
     }
 
     const { error } = await supabase
-      .from('expenses')
-      .update({ restaurant_name: name, price })
-      .eq('id', id);
+        .from('expenses')
+        .update({ restaurant, price })
+        .eq('id', id);
 
     if (error) {
-      console.error('Failed to update expense:', error.message);
-      alert('Error updating expense.');
-      return;
+        alert('Failed to update expense.');
+        return;
     }
 
-    // Hide modal and reload expenses
+    await loadExpenses();
+    await updateBudgetDisplay();
+
     const modal = bootstrap.Modal.getInstance(document.getElementById('editExpenseModal'));
     modal.hide();
+}
 
-    await loadExpenses();
-    updateBudgetDisplay();
-  }
-
-  // Delete expense handler
-  async function deleteExpense(event) {
-    const expenseId = event.target.getAttribute('data-id');
-    if (!expenseId) return;
-
+// Delete expense from Supabase
+async function deleteExpense(id) {
     if (!confirm('Are you sure you want to delete this expense?')) return;
 
     const { error } = await supabase
-      .from('expenses')
-      .delete()
-      .eq('id', expenseId);
+        .from('expenses')
+        .delete()
+        .eq('id', id);
 
     if (error) {
-      console.error('Failed to delete expense:', error.message);
-      alert('Error deleting expense.');
-      return;
+        alert('Failed to delete expense.');
+        return;
     }
 
     await loadExpenses();
-    updateBudgetDisplay();
-  }
-</script>
+    await updateBudgetDisplay();
+}
