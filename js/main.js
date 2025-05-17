@@ -1,424 +1,361 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
 
+<script>
+  // Initialize Supabase client properly
+  const supabase = supabase.createClient(
+    'https://bidotqqjspfyaexqlxdt.supabase.co',
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJpZG90cXFqc3BmeWFleHFseGR0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc0OTI0MTIsImV4cCI6MjA2MzA2ODQxMn0.OW7XnCJ35ygpUZ5wftPkB4zalSdwf5YbInuEhFCPufo'
+  );
 
-// Constants for localStorage keys
-const BUDGET_KEY = 'food_budget';
-const EXPENSES_KEY = 'food_expenses';
-
-const supabase = supabase.createClient(
-  'https://bidotqqjspfyaexqlxdt.supabase.co',
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJpZG90cXFqc3BmeWFleHFseGR0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc0OTI0MTIsImV4cCI6MjA2MzA2ODQxMn0.OW7XnCJ35ygpUZ5wftPkB4zalSdwf5YbInuEhFCPufo'
-);
-
-// DOM Elements
-document.addEventListener('DOMContentLoaded', function() {
-    // Initialize the app
+  // DOM Ready
+  document.addEventListener('DOMContentLoaded', () => {
     initApp();
-    
-    // Add event listeners for static elements
+
     document.getElementById('expenseForm').addEventListener('submit', addExpense);
     document.getElementById('editBudgetForm').addEventListener('submit', updateBudget);
     document.getElementById('resetBudgetBtn').addEventListener('click', resetBudget);
-    
-    // Add event listener for edit expense form using event delegation
-    document.body.addEventListener('submit', function(event) {
-        if (event.target.id === 'editExpenseForm') {
-            event.preventDefault();
-            updateExpense(event);
-        }
+
+    document.body.addEventListener('submit', event => {
+      if (event.target.id === 'editExpenseForm') {
+        event.preventDefault();
+        updateExpense(event);
+      }
     });
-});
+  });
 
-// Initialize the application
-function initApp() {
-    // Set current month
+  // Globals
+  let currentBudget = 0;
+  let expensesList = [];
+
+  // Initialize app: load month, budget, expenses, and update UI
+  async function initApp() {
     displayCurrentMonth();
-    
-    // Load budget and expenses from localStorage
-    loadBudget();
-    loadExpenses();
-    
-    // Update budget display
+    await loadBudget();
+    await loadExpenses();
     updateBudgetDisplay();
-}
+  }
 
-// Display current month in the format "Month Year"
-function displayCurrentMonth() {
+  // Show current month Year
+  function displayCurrentMonth() {
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     const now = new Date();
-    const monthYear = `${months[now.getMonth()]} ${now.getFullYear()}`;
-    document.getElementById('currentMonth').textContent = monthYear;
-}
+    document.getElementById('currentMonth').textContent = `${months[now.getMonth()]} ${now.getFullYear()}`;
+  }
 
-// Load budget from localStorage or set default
-function loadBudget() {
-    const currentMonth = getCurrentMonthKey();
-    let budgetData = JSON.parse(localStorage.getItem(BUDGET_KEY)) || {};
-    
-    if (!budgetData[currentMonth]) {
-        budgetData[currentMonth] = 0;
-        localStorage.setItem(BUDGET_KEY, JSON.stringify(budgetData));
+  // Load budget from Supabase (assuming only 1 budget record)
+  async function loadBudget() {
+    const { data, error } = await supabase
+      .from('budgets')
+      .select('*')
+      .limit(1)
+      .single();
+
+    if (error) {
+      console.error('Failed to load budget:', error.message);
+      currentBudget = 0;
+      updateBudgetUI(0);
+      return;
     }
-    
-    document.getElementById('budgetAmount').textContent = formatCurrency(budgetData[currentMonth]);
-    document.getElementById('editBudgetAmount').value = budgetData[currentMonth];
-}
 
-// Load expenses from localStorage
-function loadExpenses() {
-    const currentMonth = getCurrentMonthKey();
-    let expensesData = JSON.parse(localStorage.getItem(EXPENSES_KEY)) || {};
-    
-    if (!expensesData[currentMonth]) {
-        expensesData[currentMonth] = [];
-        localStorage.setItem(EXPENSES_KEY, JSON.stringify(expensesData));
+    currentBudget = data?.amount || 0;
+    updateBudgetUI(currentBudget);
+  }
+
+  // Update budget UI display
+  function updateBudgetUI(amount) {
+    document.getElementById('budgetAmount').textContent = formatCurrency(amount);
+    document.getElementById('editBudgetAmount').value = amount;
+  }
+
+  // Load expenses from Supabase
+  async function loadExpenses() {
+    const { data, error } = await supabase
+      .from('expenses')
+      .select('*')
+      .order('date', { ascending: false });
+
+    if (error) {
+      console.error('Failed to load expenses:', error.message);
+      expensesList = [];
+      renderExpensesTable([]);
+      return;
     }
-    
-    renderExpensesTable(expensesData[currentMonth]);
-}
 
-// Update the budget amount
-function updateBudget(event) {
+    expensesList = data || [];
+    renderExpensesTable(expensesList);
+  }
+
+  // Add new expense (submit event)
+  async function addExpense(event) {
     event.preventDefault();
-    
-    const budgetInput = document.getElementById('editBudgetAmount');
-    const newBudget = parseFloat(budgetInput.value);
-    
+
+    const name = document.getElementById('restaurantName').value.trim();
+    const price = parseFloat(document.getElementById('expensePrice').value);
+
+    if (!name || isNaN(price) || price < 0) {
+      alert('Please enter valid expense details.');
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('expenses')
+      .insert([{ restaurant_name: name, price, date: new Date().toISOString() }]);
+
+    if (error) {
+      console.error('Failed to add expense:', error.message);
+      alert('Error adding expense.');
+      return;
+    }
+
+    document.getElementById('expenseForm').reset();
+    await loadExpenses();
+    updateBudgetDisplay();
+  }
+
+  // Update budget (submit event)
+  async function updateBudget(event) {
+    event.preventDefault();
+
+    const newBudget = parseFloat(document.getElementById('editBudgetAmount').value);
     if (isNaN(newBudget) || newBudget < 0) {
-        alert('Please enter a valid budget amount');
-        return;
+      alert('Enter a valid budget.');
+      return;
     }
-    
-    // Update budget in localStorage
-    const currentMonth = getCurrentMonthKey();
-    let budgetData = JSON.parse(localStorage.getItem(BUDGET_KEY)) || {};
-    budgetData[currentMonth] = newBudget;
-    localStorage.setItem(BUDGET_KEY, JSON.stringify(budgetData));
-    
-    // Update UI
-    document.getElementById('budgetAmount').textContent = formatCurrency(newBudget);
+
+    // Assume only one budget record; update or insert accordingly
+    const { data: existing, error: fetchError } = await supabase
+      .from('budgets')
+      .select('*')
+      .limit(1)
+      .single();
+
+    if (fetchError && fetchError.code !== 'PGRST116') {
+      console.error('Error fetching budget:', fetchError.message);
+      return;
+    }
+
+    if (existing) {
+      // Update
+      const { error: updateError } = await supabase
+        .from('budgets')
+        .update({ amount: newBudget })
+        .eq('id', existing.id);
+
+      if (updateError) {
+        console.error('Failed to update budget:', updateError.message);
+        return;
+      }
+    } else {
+      // Insert new budget row
+      const { error: insertError } = await supabase
+        .from('budgets')
+        .insert([{ amount: newBudget }]);
+
+      if (insertError) {
+        console.error('Failed to insert budget:', insertError.message);
+        return;
+      }
+    }
+
+    currentBudget = newBudget;
+    updateBudgetUI(newBudget);
     updateBudgetDisplay();
-    
-    // Close modal
+
+    // Hide modal
     const modal = bootstrap.Modal.getInstance(document.getElementById('editBudgetModal'));
     modal.hide();
-}
+  }
 
-// Reset budget to zero
-function resetBudget() {
-    // Set budget to zero in localStorage
-    const currentMonth = getCurrentMonthKey();
-    let budgetData = JSON.parse(localStorage.getItem(BUDGET_KEY)) || {};
-    budgetData[currentMonth] = 0;
-    localStorage.setItem(BUDGET_KEY, JSON.stringify(budgetData));
-    
-    // Update UI
-    document.getElementById('budgetAmount').textContent = formatCurrency(0);
-    document.getElementById('editBudgetAmount').value = 0;
+  // Reset budget to zero
+  async function resetBudget() {
+    const zero = 0;
+
+    // Update budget record to 0
+    const { data: existing, error: fetchError } = await supabase
+      .from('budgets')
+      .select('*')
+      .limit(1)
+      .single();
+
+    if (fetchError && fetchError.code !== 'PGRST116') {
+      console.error('Error fetching budget:', fetchError.message);
+      return;
+    }
+
+    if (existing) {
+      const { error: updateError } = await supabase
+        .from('budgets')
+        .update({ amount: zero })
+        .eq('id', existing.id);
+
+      if (updateError) {
+        console.error('Failed to reset budget:', updateError.message);
+        return;
+      }
+    } else {
+      const { error: insertError } = await supabase
+        .from('budgets')
+        .insert([{ amount: zero }]);
+
+      if (insertError) {
+        console.error('Failed to insert budget:', insertError.message);
+        return;
+      }
+    }
+
+    currentBudget = zero;
+    updateBudgetUI(zero);
     updateBudgetDisplay();
-    
-    // Close modal
+
+    // Hide modal
     const modal = bootstrap.Modal.getInstance(document.getElementById('editBudgetModal'));
     modal.hide();
-}
+  }
 
-// Add a new expense
-function addExpense(event) {
-    event.preventDefault();
-    
-    const restaurantInput = document.getElementById('restaurantName');
-    const priceInput = document.getElementById('expensePrice');
-    
-    const restaurant = restaurantInput.value.trim();
-    const price = parseFloat(priceInput.value);
-    
-    if (restaurant === '') {
-        alert('Please enter a restaurant name');
-        return;
-    }
-    
-    if (isNaN(price) || price <= 0) {
-        alert('Please enter a valid price');
-        return;
-    }
-    
-    // Create new expense object
-    const newExpense = {
-        id: Date.now(),
-        restaurant: restaurant,
-        price: price,
-        date: new Date().toISOString().split('T')[0]
-    };
-    
-    // Add to localStorage
-    const currentMonth = getCurrentMonthKey();
-    let expensesData = JSON.parse(localStorage.getItem(EXPENSES_KEY)) || {};
-    
-    if (!expensesData[currentMonth]) {
-        expensesData[currentMonth] = [];
-    }
-    
-    expensesData[currentMonth].unshift(newExpense); // Add to beginning of array
-    localStorage.setItem(EXPENSES_KEY, JSON.stringify(expensesData));
-    
-    // Update UI
-    renderExpensesTable(expensesData[currentMonth]);
-    updateBudgetDisplay();
-    
-    // Reset form
-    restaurantInput.value = '';
-    priceInput.value = '';
-    restaurantInput.focus();
-}
+  // Render expenses table rows
+  function renderExpensesTable(expenses) {
+    const tbody = document.getElementById('expensesTableBody');
+    const totalSpentElem = document.getElementById('totalSpent');
+    tbody.innerHTML = '';
 
-// Render the expenses table
-function renderExpensesTable(expenses) {
-    const tableBody = document.getElementById('expensesTableBody');
-    const totalElement = document.getElementById('totalSpent');
-    
-    // Clear existing rows
-    tableBody.innerHTML = '';
-    
-    // Calculate total
-    let total = 0;
-    
-    // Add expense rows
+    if (!expenses.length) {
+      document.getElementById('emptyTableMessage').classList.remove('d-none');
+      totalSpentElem.textContent = formatCurrency(0);
+      return;
+    } else {
+      document.getElementById('emptyTableMessage').classList.add('d-none');
+    }
+
+    let totalSpent = 0;
+
     expenses.forEach(expense => {
-        total += expense.price;
-        
-        const row = document.createElement('tr');
-        row.setAttribute('data-id', expense.id);
-        row.innerHTML = `
-            <td>${expense.restaurant}</td>
-            <td>₱${expense.price.toLocaleString('en-PH', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-            <td>${formatDate(expense.date)}</td>
-            <td class="text-end">
-                <button class="btn btn-sm btn-outline-secondary edit-expense" data-id="${expense.id}">Edit</button>
-                <button class="btn btn-sm btn-outline-danger delete-expense" data-id="${expense.id}">Delete</button>
-            </td>
-        `;
-        
-        tableBody.appendChild(row);
+      totalSpent += expense.price;
+
+      const tr = document.createElement('tr');
+      tr.setAttribute('data-id', expense.id);
+      tr.innerHTML = `
+        <td>${expense.restaurant_name}</td>
+        <td>₱${expense.price.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+        <td>${formatDate(expense.date)}</td>
+        <td class="text-end">
+          <button class="btn btn-sm btn-outline-secondary edit-expense" data-id="${expense.id}">Edit</button>
+          <button class="btn btn-sm btn-outline-danger delete-expense" data-id="${expense.id}">Delete</button>
+        </td>
+      `;
+      tbody.appendChild(tr);
     });
-    
-    // Add event listeners to edit buttons
-    document.querySelectorAll('.edit-expense').forEach(button => {
-        button.addEventListener('click', function() {
-            const expenseId = parseInt(this.getAttribute('data-id'));
-            editExpense(expenseId);
-        });
+
+    totalSpentElem.textContent = formatCurrency(totalSpent);
+
+    // Attach event listeners for edit & delete buttons
+    tbody.querySelectorAll('.edit-expense').forEach(button => {
+      button.addEventListener('click', openEditExpenseModal);
     });
-    
-    // Add event listeners to delete buttons
-    document.querySelectorAll('.delete-expense').forEach(button => {
-        button.addEventListener('click', function() {
-            const expenseId = parseInt(this.getAttribute('data-id'));
-            deleteExpense(expenseId);
-        });
+    tbody.querySelectorAll('.delete-expense').forEach(button => {
+      button.addEventListener('click', deleteExpense);
     });
-    
-    // Update total row
-    totalElement.textContent = formatCurrency(total);
-    
-    // Show/hide empty message
-    const emptyMessage = document.getElementById('emptyTableMessage');
-    if (expenses.length === 0) {
-        emptyMessage.classList.remove('d-none');
+  }
+
+  // Format currency string
+  function formatCurrency(amount) {
+    return '₱' + amount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  // Format date for display (YYYY-MM-DD)
+  function formatDate(dateString) {
+    const d = new Date(dateString);
+    return d.toISOString().split('T')[0];
+  }
+
+  // Calculate remaining budget and update progress bar
+  function updateBudgetDisplay() {
+    const totalSpent = expensesList.reduce((sum, e) => sum + e.price, 0);
+    const remaining = currentBudget - totalSpent;
+    const remainingElem = document.getElementById('remainingBudget');
+    const progressBar = document.getElementById('budgetProgressBar');
+
+    remainingElem.textContent = formatCurrency(remaining < 0 ? 0 : remaining);
+
+    const percent = currentBudget > 0 ? Math.min((totalSpent / currentBudget) * 100, 100) : 0;
+    progressBar.style.width = `${percent}%`;
+    progressBar.setAttribute('aria-valuenow', percent);
+
+    if (remaining < 0) {
+      progressBar.classList.remove('bg-success');
+      progressBar.classList.add('bg-danger');
     } else {
-        emptyMessage.classList.add('d-none');
+      progressBar.classList.remove('bg-danger');
+      progressBar.classList.add('bg-success');
     }
-}
+  }
 
-// Update the budget display (remaining amount)
-function updateBudgetDisplay() {
-    const currentMonth = getCurrentMonthKey();
-    
-    // Get budget
-    const budgetData = JSON.parse(localStorage.getItem(BUDGET_KEY)) || {};
-    const budget = budgetData[currentMonth] || 0;
-    
-    // Calculate total expenses
-    const expensesData = JSON.parse(localStorage.getItem(EXPENSES_KEY)) || {};
-    const expenses = expensesData[currentMonth] || [];
-    const totalSpent = expenses.reduce((sum, expense) => sum + expense.price, 0);
-    
-    // Calculate remaining budget
-    const remaining = budget - totalSpent;
-    
-    // Update the UI
-    const budgetLeftElement = document.getElementById('budgetLeft');
-    budgetLeftElement.textContent = `Left: ${formatCurrency(remaining)} / ${formatCurrency(budget)}`;
-    
-    // Add color class based on percentage left
-    budgetLeftElement.classList.remove('danger', 'warning', 'good');
-    
-    if (budget === 0) {
-        // No budget set
-        budgetLeftElement.classList.add('warning');
-    } else {
-        const percentLeft = (remaining / budget) * 100;
-        
-        if (percentLeft < 25) {
-            budgetLeftElement.classList.add('danger');
-        } else if (percentLeft < 50) {
-            budgetLeftElement.classList.add('warning');
-        } else {
-            budgetLeftElement.classList.add('good');
-        }
-    }
-}
+  // Open edit expense modal and populate form
+  async function openEditExpenseModal(event) {
+    const expenseId = event.target.getAttribute('data-id');
+    if (!expenseId) return;
 
-// Helper: Get current month in format "YYYY-MM"
-function getCurrentMonthKey() {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-}
+    const expense = expensesList.find(e => e.id == expenseId);
+    if (!expense) return;
 
-// Helper: Format currency in Philippine Peso
-function formatCurrency(amount) {
-    return `₱${amount.toLocaleString('en-PH', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-}
+    document.getElementById('editExpenseId').value = expense.id;
+    document.getElementById('editExpenseName').value = expense.restaurant_name;
+    document.getElementById('editExpensePrice').value = expense.price;
 
-// Delete an expense
-function deleteExpense(expenseId) {
-    if (!confirm('Are you sure you want to delete this expense?')) {
-        return;
-    }
-    
-    const currentMonth = getCurrentMonthKey();
-    let expensesData = JSON.parse(localStorage.getItem(EXPENSES_KEY)) || {};
-    
-    if (expensesData[currentMonth]) {
-        // Find and remove the expense
-        expensesData[currentMonth] = expensesData[currentMonth].filter(expense => expense.id !== expenseId);
-        localStorage.setItem(EXPENSES_KEY, JSON.stringify(expensesData));
-        
-        // Update UI
-        renderExpensesTable(expensesData[currentMonth]);
-        updateBudgetDisplay();
-    }
-}
-
-// Edit an expense
-function editExpense(expenseId) {
-    const currentMonth = getCurrentMonthKey();
-    let expensesData = JSON.parse(localStorage.getItem(EXPENSES_KEY)) || {};
-    
-    if (!expensesData[currentMonth]) {
-        return;
-    }
-    
-    // Find the expense
-    const expense = expensesData[currentMonth].find(exp => exp.id === expenseId);
-    
-    if (!expense) {
-        alert('Expense not found');
-        return;
-    }
-    
-    // Display the modal first before accessing its elements
-    const editExpenseModal = document.getElementById('editExpenseModal');
-    const editModal = new bootstrap.Modal(editExpenseModal);
+    const editModal = new bootstrap.Modal(document.getElementById('editExpenseModal'));
     editModal.show();
-    
-    // Wait for the modal to be shown before accessing form elements
-    editExpenseModal.addEventListener('shown.bs.modal', function() {
-        // Now the modal is visible, so we can safely access the elements
-        const editExpenseIdInput = document.getElementById('editExpenseId');
-        const editRestaurantNameInput = document.getElementById('editRestaurantName');
-        const editExpensePriceInput = document.getElementById('editExpensePrice');
-        
-        if (!editExpenseIdInput || !editRestaurantNameInput || !editExpensePriceInput) {
-            alert('An error occurred. Please try again.');
-            editModal.hide();
-            return;
-        }
-        
-        // Populate edit modal with expense data
-        editExpenseIdInput.value = expense.id;
-        editRestaurantNameInput.value = expense.restaurant;
-        editExpensePriceInput.value = expense.price;
-    }, { once: true }); // Only run this listener once
-}
+  }
 
-// Update an expense
-function updateExpense(event) {
+  // Update expense after editing
+  async function updateExpense(event) {
     event.preventDefault();
-    
-    // Get form elements and values
-    const editExpenseIdInput = document.getElementById('editExpenseId');
-    
-    if (!editExpenseIdInput) {
-        return;
-    }
-    
-    const expenseId = parseInt(editExpenseIdInput.value);
-    
-    // Get other form inputs
-    const restaurantInput = document.getElementById('editRestaurantName');
-    const priceInput = document.getElementById('editExpensePrice');
-    
-    if (!restaurantInput || !priceInput) {
-        return;
-    }
-    
-    const restaurant = restaurantInput.value.trim();
-    const price = parseFloat(priceInput.value);
-    
-    if (restaurant === '') {
-        alert('Please enter a restaurant name');
-        return;
-    }
-    
-    if (isNaN(price) || price <= 0) {
-        alert('Please enter a valid price');
-        return;
-    }
-    
-    const currentMonth = getCurrentMonthKey();
-    let expensesData = JSON.parse(localStorage.getItem(EXPENSES_KEY)) || {};
-    
-    if (!expensesData[currentMonth]) {
-        return;
-    }
-    
-    // Find and update the expense
-    const expenseIndex = expensesData[currentMonth].findIndex(exp => exp.id === expenseId);
-    
-    if (expenseIndex === -1) {
-        alert('Expense not found');
-        return;
-    }
-    
-    // Update the expense
-    expensesData[currentMonth][expenseIndex].restaurant = restaurant;
-    expensesData[currentMonth][expenseIndex].price = price;
-    
-    // Save updated data to localStorage
-    localStorage.setItem(EXPENSES_KEY, JSON.stringify(expensesData));
-    
-    // Update UI
-    renderExpensesTable(expensesData[currentMonth]);
-    updateBudgetDisplay();
-    
-    // Close modal
-    const editExpenseModal = document.getElementById('editExpenseModal');
-    const modal = bootstrap.Modal.getInstance(editExpenseModal);
-    if (modal) {
-        modal.hide();
-    } else {
-        // Try to hide it manually if modal instance is not found
-        editExpenseModal.classList.remove('show');
-        document.body.classList.remove('modal-open');
-        const backdrop = document.querySelector('.modal-backdrop');
-        if (backdrop) {
-            backdrop.remove();
-        }
-    }
-}
 
-// Helper: Format date in a readable format
-function formatDate(dateStr) {
-    const options = { year: 'numeric', month: 'short', day: 'numeric' };
-    return new Date(dateStr).toLocaleDateString('en-PH', options);
-}
+    const id = document.getElementById('editExpenseId').value;
+    const name = document.getElementById('editExpenseName').value.trim();
+    const price = parseFloat(document.getElementById('editExpensePrice').value);
+
+    if (!name || isNaN(price) || price < 0) {
+      alert('Please enter valid expense details.');
+      return;
+    }
+
+    const { error } = await supabase
+      .from('expenses')
+      .update({ restaurant_name: name, price })
+      .eq('id', id);
+
+    if (error) {
+      console.error('Failed to update expense:', error.message);
+      alert('Error updating expense.');
+      return;
+    }
+
+    // Hide modal and reload expenses
+    const modal = bootstrap.Modal.getInstance(document.getElementById('editExpenseModal'));
+    modal.hide();
+
+    await loadExpenses();
+    updateBudgetDisplay();
+  }
+
+  // Delete expense handler
+  async function deleteExpense(event) {
+    const expenseId = event.target.getAttribute('data-id');
+    if (!expenseId) return;
+
+    if (!confirm('Are you sure you want to delete this expense?')) return;
+
+    const { error } = await supabase
+      .from('expenses')
+      .delete()
+      .eq('id', expenseId);
+
+    if (error) {
+      console.error('Failed to delete expense:', error.message);
+      alert('Error deleting expense.');
+      return;
+    }
+
+    await loadExpenses();
+    updateBudgetDisplay();
+  }
+</script>
