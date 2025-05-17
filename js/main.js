@@ -1,8 +1,7 @@
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
 
 <script>
   // Initialize Supabase client properly
-  const supabase = Supabase.createClient(
+  const supabase = supabase.createClient(
     'https://bidotqqjspfyaexqlxdt.supabase.co',
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJpZG90cXFqc3BmeWFleHFseGR0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc0OTI0MTIsImV4cCI6MjA2MzA2ODQxMn0.OW7XnCJ35ygpUZ5wftPkB4zalSdwf5YbInuEhFCPufo'
   );
